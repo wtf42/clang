@@ -56,6 +56,12 @@
 #include "llvm/Support/ErrorHandling.h"
 #include "llvm/Support/MD5.h"
 
+#include "llvm/AsmParser/Parser.h"
+#include "llvm/Support/SourceMgr.h"
+#include "llvm/IR/LLVMContext.h"
+#include "llvm/Linker/Linker.h"
+#include "llvm/Support/ErrorHandling.h"
+
 using namespace clang;
 using namespace CodeGen;
 
@@ -3773,7 +3779,23 @@ void CodeGenModule::EmitTopLevelDecl(Decl *D) {
     if (LangOpts.OpenMPIsDevice)
       break;
     auto *AD = cast<FileScopeAsmDecl>(D);
-    getModule().appendModuleInlineAsm(AD->getAsmString()->getString());
+    //getModule().appendModuleInlineAsm(AD->getAsmString()->getString());
+    llvm::LLVMContext &Ctx = llvm::getGlobalContext();
+    llvm::SMDiagnostic Error;
+    std::string AsmStr = AD->getAsmString()->getString();
+    auto &&Mod = parseAssemblyString(AsmStr, Error, Ctx);
+    if (!Mod) {
+        std::string ErrMsg;
+        llvm::raw_string_ostream Errs(ErrMsg);
+        Errs << "failed to parse inline assembly:" << "\n";
+        Errs << std::string(Error.getMessage()) << "\n";
+        Errs << "line " << Error.getLineNo() << "\n";
+        Errs << std::string(Error.getLineContents()) << "\n";
+        llvm::report_fatal_error(Errs.str());
+        this->Error(D->getLocStart(), Errs.str());
+        break;
+    }
+    llvm::Linker::linkModules(getModule(), std::move(Mod));
     break;
   }
 
