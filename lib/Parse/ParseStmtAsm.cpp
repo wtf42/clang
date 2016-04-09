@@ -620,6 +620,83 @@ StmtResult Parser::ParseMicrosoftAsmStatement(SourceLocation AsmLoc) {
                                 ClobberRefs, Exprs, EndLoc);
 }
 
+StmtResult Parser::ParseIRAsmStatement(SourceLocation AsmLoc) {
+  SourceLocation Loc = ConsumeToken(); // __ir
+
+                                       //// Remember if this was a volatile asm.
+  if (Tok.isNot(tok::l_paren)) {
+    Diag(Tok, diag::err_expected_lparen_after) << "asm";
+    SkipUntil(tok::r_paren, StopAtSemi);
+    return StmtError();
+  }
+  BalancedDelimiterTracker T(*this, tok::l_paren);
+  T.consumeOpen();
+
+  ExprResult AsmString(ParseAsmStringLiteral());
+
+  // Check if IR InlineAsm is disabled.
+  if (!getLangOpts().IRAsm) {
+    Diag(Loc, diag::err_gnu_inline_asm_disabled);
+  }
+
+  if (AsmString.isInvalid()) {
+    // Consume up to and including the closing paren.
+    T.skipToEnd();
+    return StmtError();
+  }
+
+  SmallVector<IdentifierInfo *, 4> Names;
+  ExprVector Constraints;
+  ExprVector Exprs;
+  ExprVector Clobbers;
+
+  if (Tok.is(tok::r_paren)) {
+    // We have a simple asm expression like 'asm("foo")'.
+    T.consumeClose();
+    return Actions.ActOnIRAsmStmt(AsmLoc, /*isSimple*/ true, false,
+      /*NumOutputs*/ 0, /*NumInputs*/ 0, nullptr,
+      Constraints, Exprs, AsmString.get(),
+      Clobbers, T.getCloseLocation());
+  }
+
+  // Parse Outputs, if present.
+  bool AteExtraColon = false;
+  if (Tok.is(tok::colon) || Tok.is(tok::coloncolon)) {
+    // In C++ mode, parse "::" like ": :".
+    AteExtraColon = Tok.is(tok::coloncolon);
+    ConsumeToken();
+
+    if (!AteExtraColon && ParseIRAsmOperandsOpt(Names, Constraints, Exprs))
+      return StmtError();
+  }
+
+  unsigned NumOutputs = Names.size();
+
+  // Parse Inputs, if present.
+  if (AteExtraColon || Tok.is(tok::colon) || Tok.is(tok::coloncolon)) {
+    // In C++ mode, parse "::" like ": :".
+    if (AteExtraColon)
+      AteExtraColon = false;
+    else {
+      AteExtraColon = Tok.is(tok::coloncolon);
+      ConsumeToken();
+    }
+
+    if (!AteExtraColon && ParseIRAsmOperandsOpt(Names, Constraints, Exprs))
+      return StmtError();
+  }
+
+  assert(Names.size() == Constraints.size() &&
+    Constraints.size() == Exprs.size() && "Input operand size mismatch!");
+
+  unsigned NumInputs = Names.size() - NumOutputs;
+
+  T.consumeClose();
+  return Actions.ActOnIRAsmStmt(
+    AsmLoc, false, false, NumOutputs, NumInputs, Names.data(),
+    Constraints, Exprs, AsmString.get(), Clobbers, T.getCloseLocation());
+}
+
 /// ParseAsmStatement - Parse a GNU extended asm statement.
 ///       asm-statement:
 ///         gnu-asm-statement
@@ -642,6 +719,10 @@ StmtResult Parser::ParseMicrosoftAsmStatement(SourceLocation AsmLoc) {
 StmtResult Parser::ParseAsmStatement(bool &msAsm) {
   assert(Tok.is(tok::kw_asm) && "Not an asm stmt");
   SourceLocation AsmLoc = ConsumeToken();
+
+  if (Tok.is(tok::kw___ir)) {
+	  return ParseIRAsmStatement(AsmLoc);
+  }
 
   if (getLangOpts().AsmBlocks && Tok.isNot(tok::l_paren) &&
       !isTypeQualifier()) {
@@ -829,3 +910,43 @@ bool Parser::ParseAsmOperandsOpt(SmallVectorImpl<IdentifierInfo *> &Names,
       return false;
   }
 }
+
+bool Parser::ParseIRAsmOperandsOpt(SmallVectorImpl<IdentifierInfo *> &Names,
+                                   SmallVectorImpl<Expr *> &Constraints,
+                                   SmallVectorImpl<Expr *> &Exprs) {
+  // 'asm-operands' isn't present?
+  if (!isTokenStringLiteral() && Tok.isNot(tok::l_square))
+    return false;
+
+  while (1) {
+    Names.push_back(nullptr);
+
+    ExprResult Constraint(ParseAsmStringLiteral());
+    if (Constraint.isInvalid()) {
+      SkipUntil(tok::r_paren, StopAtSemi);
+      return true;
+    }
+    Constraints.push_back(Constraint.get());
+
+    if (Tok.isNot(tok::l_paren)) {
+      Diag(Tok, diag::err_expected_lparen_after) << "asm operand";
+      SkipUntil(tok::r_paren, StopAtSemi);
+      return true;
+    }
+
+    // Read the parenthesized expression.
+    BalancedDelimiterTracker T(*this, tok::l_paren);
+    T.consumeOpen();
+    ExprResult Res = Actions.CorrectDelayedTyposInExpr(ParseExpression());
+    T.consumeClose();
+    if (Res.isInvalid()) {
+      SkipUntil(tok::r_paren, StopAtSemi);
+      return true;
+    }
+    Exprs.push_back(Res.get());
+    // Eat the comma and continue parsing if it exists.
+    if (!TryConsumeToken(tok::comma))
+      return false;
+  }
+}
+

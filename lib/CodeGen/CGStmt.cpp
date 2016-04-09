@@ -27,6 +27,8 @@
 #include "llvm/IR/InlineAsm.h"
 #include "llvm/IR/Intrinsics.h"
 #include "llvm/IR/MDBuilder.h"
+#include "llvm/IR/InstIterator.h"
+#include "llvm/AsmParser/Parser.h"
 
 using namespace clang;
 using namespace CodeGen;
@@ -139,6 +141,7 @@ void CodeGenFunction::EmitStmt(const Stmt *S) {
   case Stmt::ReturnStmtClass:   EmitReturnStmt(cast<ReturnStmt>(*S));     break;
 
   case Stmt::SwitchStmtClass:   EmitSwitchStmt(cast<SwitchStmt>(*S));     break;
+  case Stmt::IRAsmStmtClass:    EmitIRAsmStmt(cast<IRAsmStmt>(*S));       break;
   case Stmt::GCCAsmStmtClass:   // Intentional fall-through.
   case Stmt::MSAsmStmtClass:    EmitAsmStmt(cast<AsmStmt>(*S));           break;
   case Stmt::CoroutineBodyStmtClass:
@@ -1745,6 +1748,298 @@ static llvm::MDNode *getAsmSrcLocInfo(const StringLiteral *Str,
   }
 
   return llvm::MDNode::get(CGF.getLLVMContext(), Locs);
+}
+
+void CodeGenFunction::EmitIRAsmStmt(const IRAsmStmt &S) {
+  std::string AsmString = S.generateAsmString(getContext());
+
+  // ***************************************************************************
+
+  // Get all the output and input constraints together.
+  SmallVector<TargetInfo::ConstraintInfo, 4> OutputConstraintInfos;
+  SmallVector<TargetInfo::ConstraintInfo, 4> InputConstraintInfos;
+
+  for (unsigned i = 0, e = S.getNumOutputs(); i != e; i++) {
+    StringRef Name = S.getOutputName(i);
+    TargetInfo::ConstraintInfo Info(S.getOutputConstraint(i), Name);
+    bool IsValid = getTarget().validateOutputConstraint(Info); (void)IsValid;
+    assert(IsValid && "Failed to parse output constraint");
+    OutputConstraintInfos.push_back(Info);
+  }
+
+  for (unsigned i = 0, e = S.getNumInputs(); i != e; i++) {
+    StringRef Name = S.getInputName(i);
+    TargetInfo::ConstraintInfo Info(S.getInputConstraint(i), Name);
+    bool IsValid =
+      getTarget().validateInputConstraint(OutputConstraintInfos, Info);
+    assert(IsValid && "Failed to parse input constraint"); (void)IsValid;
+    InputConstraintInfos.push_back(Info);
+  }
+
+  std::string Constraints;
+
+  std::vector<LValue> ResultRegDests;
+  std::vector<QualType> ResultRegQualTys;
+  std::vector<llvm::Type *> ResultRegTypes;
+  std::vector<llvm::Type *> ResultTruncRegTypes;
+  std::vector<llvm::Type *> ArgTypes;
+  std::vector<llvm::Value*> Args;
+
+  // Keep track of inout constraints.
+  std::string InOutConstraints;
+  std::vector<llvm::Value*> InOutArgs;
+  std::vector<llvm::Type*> InOutArgTypes;
+
+  for (unsigned i = 0, e = S.getNumOutputs(); i != e; i++) {
+    TargetInfo::ConstraintInfo &Info = OutputConstraintInfos[i];
+
+    // Simplify the output constraint.
+    std::string OutputConstraint(S.getOutputConstraint(i));
+    OutputConstraint = SimplifyConstraint(OutputConstraint.c_str() + 1,
+      getTarget());
+
+    const Expr *OutExpr = S.getOutputExpr(i);
+    OutExpr = OutExpr->IgnoreParenNoopCasts(getContext());
+
+    OutputConstraint = AddVariableConstraints(OutputConstraint, *OutExpr,
+      getTarget(), CGM, S,
+      Info.earlyClobber());
+
+    LValue Dest = EmitLValue(OutExpr);
+    if (!Constraints.empty())
+      Constraints += ',';
+
+    // If this is a register output, then make the inline asm return it
+    // by-value.  If this is a memory result, return the value by-reference.
+    if (!Info.allowsMemory() && hasScalarEvaluationKind(OutExpr->getType())) {
+      Constraints += "=" + OutputConstraint;
+      ResultRegQualTys.push_back(OutExpr->getType());
+      ResultRegDests.push_back(Dest);
+      ResultRegTypes.push_back(ConvertTypeForMem(OutExpr->getType()));
+      ResultTruncRegTypes.push_back(ResultRegTypes.back());
+
+      // If this output is tied to an input, and if the input is larger, then
+      // we need to set the actual result type of the inline asm node to be the
+      // same as the input type.
+      if (Info.hasMatchingInput()) {
+        unsigned InputNo;
+        for (InputNo = 0; InputNo != S.getNumInputs(); ++InputNo) {
+          TargetInfo::ConstraintInfo &Input = InputConstraintInfos[InputNo];
+          if (Input.hasTiedOperand() && Input.getTiedOperand() == i)
+            break;
+        }
+        assert(InputNo != S.getNumInputs() && "Didn't find matching input!");
+
+        QualType InputTy = S.getInputExpr(InputNo)->getType();
+        QualType OutputType = OutExpr->getType();
+
+        uint64_t InputSize = getContext().getTypeSize(InputTy);
+        if (getContext().getTypeSize(OutputType) < InputSize) {
+          // Form the asm to return the value as a larger integer or fp type.
+          ResultRegTypes.back() = ConvertType(InputTy);
+        }
+      }
+      if (llvm::Type* AdjTy =
+        getTargetHooks().adjustInlineAsmType(*this, OutputConstraint,
+          ResultRegTypes.back()))
+        ResultRegTypes.back() = AdjTy;
+      else {
+        CGM.getDiags().Report(S.getAsmLoc(),
+          diag::err_asm_invalid_type_in_input)
+          << OutExpr->getType() << OutputConstraint;
+      }
+    } else {
+      ArgTypes.push_back(Dest.getAddress().getType());
+      Args.push_back(Dest.getPointer());
+      Constraints += "=*";
+      Constraints += OutputConstraint;
+    }
+
+    if (Info.isReadWrite()) {
+      InOutConstraints += ',';
+
+      const Expr *InputExpr = S.getOutputExpr(i);
+      llvm::Value *Arg = EmitAsmInputLValue(Info, Dest, InputExpr->getType(),
+        InOutConstraints,
+        InputExpr->getExprLoc());
+
+      if (llvm::Type* AdjTy =
+        getTargetHooks().adjustInlineAsmType(*this, OutputConstraint,
+          Arg->getType()))
+        Arg = Builder.CreateBitCast(Arg, AdjTy);
+
+      if (Info.allowsRegister())
+        InOutConstraints += llvm::utostr(i);
+      else
+        InOutConstraints += OutputConstraint;
+
+      InOutArgTypes.push_back(Arg->getType());
+      InOutArgs.push_back(Arg);
+    }
+  }
+
+  for (unsigned i = 0, e = S.getNumInputs(); i != e; i++) {
+    const Expr *InputExpr = S.getInputExpr(i);
+
+    TargetInfo::ConstraintInfo &Info = InputConstraintInfos[i];
+
+    if (!Constraints.empty())
+      Constraints += ',';
+
+    // Simplify the input constraint.
+    std::string InputConstraint(S.getInputConstraint(i));
+    InputConstraint = SimplifyConstraint(InputConstraint.c_str(), getTarget(),
+      &OutputConstraintInfos);
+
+    InputConstraint = AddVariableConstraints(
+      InputConstraint, *InputExpr->IgnoreParenNoopCasts(getContext()),
+      getTarget(), CGM, S, false /* No EarlyClobber */);
+
+    llvm::Value *Arg = EmitAsmInput(Info, InputExpr, Constraints);
+
+    // If this input argument is tied to a larger output result, extend the
+    // input to be the same size as the output.  The LLVM backend wants to see
+    // the input and output of a matching constraint be the same size.  Note
+    // that GCC does not define what the top bits are here.  We use zext because
+    // that is usually cheaper, but LLVM IR should really get an anyext someday.
+    if (Info.hasTiedOperand()) {
+      unsigned Output = Info.getTiedOperand();
+      QualType OutputType = S.getOutputExpr(Output)->getType();
+      QualType InputTy = InputExpr->getType();
+
+      if (getContext().getTypeSize(OutputType) >
+        getContext().getTypeSize(InputTy)) {
+        // Use ptrtoint as appropriate so that we can do our extension.
+        if (isa<llvm::PointerType>(Arg->getType()))
+          Arg = Builder.CreatePtrToInt(Arg, IntPtrTy);
+        llvm::Type *OutputTy = ConvertType(OutputType);
+        if (isa<llvm::IntegerType>(OutputTy))
+          Arg = Builder.CreateZExt(Arg, OutputTy);
+        else if (isa<llvm::PointerType>(OutputTy))
+          Arg = Builder.CreateZExt(Arg, IntPtrTy);
+        else {
+          assert(OutputTy->isFloatingPointTy() && "Unexpected output type");
+          Arg = Builder.CreateFPExt(Arg, OutputTy);
+        }
+      }
+    }
+    if (llvm::Type* AdjTy =
+      getTargetHooks().adjustInlineAsmType(*this, InputConstraint,
+        Arg->getType()))
+      Arg = Builder.CreateBitCast(Arg, AdjTy);
+    else
+      CGM.getDiags().Report(S.getAsmLoc(), diag::err_asm_invalid_type_in_input)
+      << InputExpr->getType() << InputConstraint;
+
+    ArgTypes.push_back(Arg->getType());
+    Args.push_back(Arg);
+    Constraints += InputConstraint;
+  }
+
+  // Append the "input" part of inout constraints last.
+  for (unsigned i = 0, e = InOutArgs.size(); i != e; i++) {
+    ArgTypes.push_back(InOutArgTypes[i]);
+    Args.push_back(InOutArgs[i]);
+  }
+
+  llvm::Type *ResultType;
+  if (ResultRegTypes.empty())
+    ResultType = VoidTy;
+  else if (ResultRegTypes.size() == 1)
+    ResultType = ResultRegTypes[0];
+  else
+    ResultType = llvm::StructType::get(getLLVMContext(), ResultRegTypes);
+  
+  // *********************************************************************************
+
+  std::string tempFuncName = "ir_func";
+  std::string entryStr = "entry";
+
+  auto emptyFuncMod = std::make_unique<llvm::Module>("ir_inline_asm", llvm::getGlobalContext());
+  llvm::Type *retType = ResultType;
+  llvm::Function *emptyFunc = dyn_cast<llvm::Function>(
+    emptyFuncMod->getOrInsertFunction(tempFuncName, retType, NULL));
+  for (auto arg : Args) {
+    new llvm::Argument(arg->getType(), "", emptyFunc);
+  }
+  llvm::IRBuilder<> ModBuilder(emptyFuncMod->getContext());
+  llvm::BasicBlock *BB = llvm::BasicBlock::Create(emptyFuncMod->getContext(), entryStr, emptyFunc);
+  ModBuilder.SetInsertPoint(BB);
+  if (retType->isVoidTy()) {
+    ModBuilder.CreateRetVoid();
+  }
+
+  std::string modStr;
+  llvm::raw_string_ostream modStream(modStr);
+  modStream << *emptyFuncMod;
+  modStream.flush();
+
+  std::string entryInsertStr = entryStr + ":";
+  size_t entryPos = modStr.find(entryInsertStr);
+  if (entryPos == std::string::npos) {
+    llvm::report_fatal_error("can't find entry");
+    return;
+  }
+  modStr.insert(entryPos + entryInsertStr.length(), "\n" + AsmString);
+  //fprintf(stderr, "%s\n", modStr.c_str()); fflush(stderr);
+
+  llvm::SMDiagnostic Error;
+  auto parsedFuncMod = llvm::parseAssemblyString(modStr, Error, llvm::getGlobalContext());
+  if (!parsedFuncMod) {
+    std::string ErrMsg;
+    llvm::raw_string_ostream Errs(ErrMsg);
+    Errs << "failed to parse inline assembly:\n";
+    Errs << Error.getMessage() << "\n";
+    Errs << "line " << Error.getLineNo() << "\n";
+    Errs << Error.getLineContents() << "\n";
+    llvm::report_fatal_error(Errs.str());
+    return;
+  }
+  llvm::Function* parsedFunc = parsedFuncMod->getFunction(tempFuncName);
+
+  bool hasReturnInst = false;
+  for (llvm::inst_iterator I = inst_begin(parsedFunc), E = inst_end(parsedFunc); I != E; ++I) {
+    if (llvm::ReturnInst* ret = dyn_cast<llvm::ReturnInst>(&*I)) {
+      if (hasReturnInst) {
+        llvm::report_fatal_error("ir inline asm should have only one return instruction");
+      }
+      if (ret->getNumOperands() != 1) {
+        llvm::report_fatal_error("ir inline asm should have one return operand");
+      }
+      llvm::Value *Result = ret->op_begin()->get();
+      //**************************************************************************
+
+      std::vector<llvm::Value*> RegResults;
+      if (ResultRegTypes.size() == 1) {
+        RegResults.push_back(Result);
+      } else {
+        for (unsigned i = 0, e = ResultRegTypes.size(); i != e; ++i) {
+          llvm::Value *Tmp = Builder.CreateExtractValue(Result, i, "asmresult");
+          RegResults.push_back(Tmp);
+        }
+      }
+      
+      //TODO: store results to ResultRegDests
+
+      //**************************************************************************
+      hasReturnInst = true;
+      continue;
+    }
+    llvm::Instruction *i = I->clone();
+    I->replaceAllUsesWith(i);
+    if (I->hasName()) {
+      i->setName(I->getName());
+    }
+    for (auto &op : i->operands()) {
+      if (llvm::Argument *arg = dyn_cast<llvm::Argument>(op)) {
+        if (arg->getParent() == parsedFunc) {
+          op = Args[arg->getArgNo()];
+        }
+      }
+    }
+    //i->setMetadata("ir_asm", MDNode::get(FC, MDString::get(FC, "some useful info")));
+    Builder.Insert(i);
+  }
 }
 
 void CodeGenFunction::EmitAsmStmt(const AsmStmt &S) {

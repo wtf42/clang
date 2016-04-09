@@ -256,6 +256,32 @@ void ASTStmtWriter::VisitGCCAsmStmt(GCCAsmStmt *S) {
   Code = serialization::STMT_GCCASM;
 }
 
+void ASTStmtWriter::VisitIRAsmStmt(IRAsmStmt *S) {
+  VisitAsmStmt(S);
+  Writer.AddSourceLocation(S->getRParenLoc(), Record);
+  Writer.AddStmt(S->getAsmString());
+
+  // Outputs
+  for (unsigned I = 0, N = S->getNumOutputs(); I != N; ++I) {
+    Writer.AddIdentifierRef(S->getOutputIdentifier(I), Record);
+    Writer.AddStmt(S->getOutputConstraintLiteral(I));
+    Writer.AddStmt(S->getOutputExpr(I));
+  }
+
+  // Inputs
+  for (unsigned I = 0, N = S->getNumInputs(); I != N; ++I) {
+    Writer.AddIdentifierRef(S->getInputIdentifier(I), Record);
+    Writer.AddStmt(S->getInputConstraintLiteral(I));
+    Writer.AddStmt(S->getInputExpr(I));
+  }
+
+  // Clobbers
+  for (unsigned I = 0, N = S->getNumClobbers(); I != N; ++I)
+    Writer.AddStmt(S->getClobberStringLiteral(I));
+
+  Code = serialization::STMT_IRASM;
+}
+
 void ASTStmtWriter::VisitMSAsmStmt(MSAsmStmt *S) {
   VisitAsmStmt(S);
   Writer.AddSourceLocation(S->getLBraceLoc(), Record);

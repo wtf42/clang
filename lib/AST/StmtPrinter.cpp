@@ -438,6 +438,72 @@ void StmtPrinter::VisitGCCAsmStmt(GCCAsmStmt *Node) {
   if (Policy.IncludeNewlines) OS << "\n";
 }
 
+
+void StmtPrinter::VisitIRAsmStmt(IRAsmStmt *Node) {
+    Indent() << "asm ";
+
+    if (Node->isVolatile())
+        OS << "volatile ";
+
+    OS << "(";
+    VisitStringLiteral(Node->getAsmString());
+
+    // Outputs
+    if (Node->getNumOutputs() != 0 || Node->getNumInputs() != 0 ||
+        Node->getNumClobbers() != 0)
+        OS << " : ";
+
+    for (unsigned i = 0, e = Node->getNumOutputs(); i != e; ++i) {
+        if (i != 0)
+            OS << ", ";
+
+        if (!Node->getOutputName(i).empty()) {
+            OS << '[';
+            OS << Node->getOutputName(i);
+            OS << "] ";
+        }
+
+        VisitStringLiteral(Node->getOutputConstraintLiteral(i));
+        OS << " (";
+        Visit(Node->getOutputExpr(i));
+        OS << ")";
+    }
+
+    // Inputs
+    if (Node->getNumInputs() != 0 || Node->getNumClobbers() != 0)
+        OS << " : ";
+
+    for (unsigned i = 0, e = Node->getNumInputs(); i != e; ++i) {
+        if (i != 0)
+            OS << ", ";
+
+        if (!Node->getInputName(i).empty()) {
+            OS << '[';
+            OS << Node->getInputName(i);
+            OS << "] ";
+        }
+
+        VisitStringLiteral(Node->getInputConstraintLiteral(i));
+        OS << " (";
+        Visit(Node->getInputExpr(i));
+        OS << ")";
+    }
+
+    // Clobbers
+    if (Node->getNumClobbers() != 0)
+        OS << " : ";
+
+    for (unsigned i = 0, e = Node->getNumClobbers(); i != e; ++i) {
+        if (i != 0)
+            OS << ", ";
+
+        VisitStringLiteral(Node->getClobberStringLiteral(i));
+    }
+
+    OS << ");";
+    if (Policy.IncludeNewlines) OS << "\n";
+}
+
 void StmtPrinter::VisitMSAsmStmt(MSAsmStmt *Node) {
   // FIXME: Implement MS style inline asm statement printer.
   Indent() << "__asm ";

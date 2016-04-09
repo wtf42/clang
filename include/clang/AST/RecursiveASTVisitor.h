@@ -1948,6 +1948,17 @@ DEF_TRAVERSE_STMT(GCCAsmStmt, {
   // children() iterates over inputExpr and outputExpr.
 })
 
+DEF_TRAVERSE_STMT(IRAsmStmt, {
+  TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(S->getAsmString());
+  for (unsigned I = 0, E = S->getNumInputs(); I < E; ++I) {
+    TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(S->getInputConstraintLiteral(I));
+  }
+  for (unsigned I = 0, E = S->getNumOutputs(); I < E; ++I) {
+    TRY_TO_TRAVERSE_OR_ENQUEUE_STMT(S->getOutputConstraintLiteral(I));
+  }
+  // children() iterates over inputExpr and outputExpr.
+})
+
 DEF_TRAVERSE_STMT(
     MSAsmStmt,
     {// FIXME: MS Asm doesn't currently parse Constraints, Clobbers, etc.  Once

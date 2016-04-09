@@ -164,6 +164,10 @@ CXCursor cxcursor::MakeCXCursor(const Stmt *S, const Decl *Parent,
     K = CXCursor_GCCAsmStmt;
     break;
 
+  case Stmt::IRAsmStmtClass:
+    K = CXCursor_IRAsmStmt;
+    break;
+
   case Stmt::MSAsmStmtClass:
     K = CXCursor_MSAsmStmt;
     break;

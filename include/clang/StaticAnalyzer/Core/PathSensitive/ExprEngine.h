@@ -340,6 +340,10 @@ public:
   void VisitGCCAsmStmt(const GCCAsmStmt *A, ExplodedNode *Pred,
                        ExplodedNodeSet &Dst);
 
+  /// VisitIRAsmStmt - Transfer function logic for IR inline asm.
+  void VisitIRAsmStmt(const IRAsmStmt *A, ExplodedNode *Pred,
+                      ExplodedNodeSet &Dst);
+
   /// VisitMSAsmStmt - Transfer function logic for MS inline asm.
   void VisitMSAsmStmt(const MSAsmStmt *A, ExplodedNode *Pred,
                       ExplodedNodeSet &Dst);

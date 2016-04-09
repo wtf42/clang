@@ -178,6 +178,11 @@ void StmtProfiler::VisitGCCAsmStmt(const GCCAsmStmt *S) {
     VisitStringLiteral(S->getClobberStringLiteral(I));
 }
 
+void StmtProfiler::VisitIRAsmStmt(const IRAsmStmt *S) {
+  // FIXME: Implement IR style inline asm statement profiler.
+  VisitStmt(S);
+}
+
 void StmtProfiler::VisitMSAsmStmt(const MSAsmStmt *S) {
   // FIXME: Implement MS style inline asm statement profiler.
   VisitStmt(S);
