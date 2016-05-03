@@ -1690,6 +1690,7 @@ private:
   StmtResult ParseReturnStatement();
   StmtResult ParseAsmStatement(bool &msAsm);
   StmtResult ParseMicrosoftAsmStatement(SourceLocation AsmLoc);
+  StmtResult ParseIRAsmStatement(SourceLocation AsmLoc);
   StmtResult ParsePragmaLoopHint(StmtVector &Stmts,
                                  AllowedContsructsKind Allowed,
                                  SourceLocation *TrailingElseLoc,
@@ -1737,6 +1738,9 @@ private:
   bool ParseAsmOperandsOpt(SmallVectorImpl<IdentifierInfo *> &Names,
                            SmallVectorImpl<Expr *> &Constraints,
                            SmallVectorImpl<Expr *> &Exprs);
+  bool ParseIRAsmOperandsOpt(SmallVectorImpl<IdentifierInfo *> &Names,
+                             SmallVectorImpl<Expr *> &Constraints,
+                             SmallVectorImpl<Expr *> &Exprs);
 
   //===--------------------------------------------------------------------===//
   // C++ 6: Statements and Blocks

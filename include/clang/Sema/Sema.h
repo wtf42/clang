@@ -3434,6 +3434,12 @@ public:
                             ArrayRef<StringRef> Clobbers,
                             ArrayRef<Expr*> Exprs,
                             SourceLocation EndLoc);
+  StmtResult ActOnIRAsmStmt(SourceLocation AsmLoc, bool IsSimple,
+                            bool IsVolatile, unsigned NumOutputs,
+                            unsigned NumInputs, IdentifierInfo **Names,
+                            MultiExprArg constraints, MultiExprArg Exprs,
+                            Expr *asmString, MultiExprArg clobbers,
+                            SourceLocation RParenLoc);
   LabelDecl *GetOrCreateMSAsmLabel(StringRef ExternalLabelName,
                                    SourceLocation Location,
                                    bool AlwaysCreate);

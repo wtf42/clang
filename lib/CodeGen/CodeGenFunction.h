@@ -2164,6 +2164,7 @@ public:
   void EmitDefaultStmt(const DefaultStmt &S);
   void EmitCaseStmt(const CaseStmt &S);
   void EmitCaseStmtRange(const CaseStmt &S);
+  void EmitIRAsmStmt(const IRAsmStmt &S);
   void EmitAsmStmt(const AsmStmt &S);
 
   void EmitObjCForCollectionStmt(const ObjCForCollectionStmt &S);

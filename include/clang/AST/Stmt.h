@@ -1474,6 +1474,7 @@ public:
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == GCCAsmStmtClass ||
+      T->getStmtClass() == IRAsmStmtClass ||
       T->getStmtClass() == MSAsmStmtClass;
   }
 
@@ -1816,6 +1817,177 @@ public:
 
   child_range children() {
     return child_range(&Exprs[0], &Exprs[NumInputs + NumOutputs]);
+  }
+};
+
+
+class IRAsmStmt : public AsmStmt {
+  SourceLocation RParenLoc;
+  StringLiteral *AsmStr;
+
+  StringLiteral **Constraints;
+  StringLiteral **Clobbers;
+  IdentifierInfo **Names;
+
+  friend class ASTStmtReader;
+
+  void do_sth() {}
+
+public:
+  IRAsmStmt(const ASTContext &C, SourceLocation asmloc, bool issimple,
+            bool isvolatile, unsigned numoutputs, unsigned numinputs,
+            IdentifierInfo **names, StringLiteral **constraints, Expr **exprs,
+            StringLiteral *asmstr, unsigned numclobbers,
+            StringLiteral **clobbers, SourceLocation rparenloc);
+
+  /// \brief Build an empty inline-assembly statement.
+  explicit IRAsmStmt(EmptyShell Empty) : AsmStmt(IRAsmStmtClass, Empty),
+    Constraints(nullptr), Clobbers(nullptr), Names(nullptr) { }
+
+  SourceLocation getRParenLoc() const { return RParenLoc; }
+  void setRParenLoc(SourceLocation L) { RParenLoc = L; }
+
+  //===--- Asm String Analysis ---===//
+
+  const StringLiteral *getAsmString() const { return AsmStr; }
+  StringLiteral *getAsmString() { return AsmStr; }
+  void setAsmString(StringLiteral *E) { AsmStr = E; }
+
+  /// AsmStringPiece - this is part of a decomposed asm string specification
+  /// (for use with the AnalyzeAsmString function below).  An asm string is
+  /// considered to be a concatenation of these parts.
+  class AsmStringPiece {
+  public:
+    enum Kind {
+      String,  // String in .ll asm string form, "$" -> "$$" and "%%" -> "%".
+      Operand  // Operand reference, with optional modifier %c4.
+    };
+  private:
+    Kind MyKind;
+    std::string Str;
+    unsigned OperandNo;
+
+    // Source range for operand references.
+    CharSourceRange Range;
+  public:
+    AsmStringPiece(const std::string &S) : MyKind(String), Str(S) {}
+    AsmStringPiece(unsigned OpNo, const std::string &S, SourceLocation Begin,
+      SourceLocation End)
+      : MyKind(Operand), Str(S), OperandNo(OpNo),
+      Range(CharSourceRange::getCharRange(Begin, End)) {
+    }
+
+    bool isString() const { return MyKind == String; }
+    bool isOperand() const { return MyKind == Operand; }
+
+    const std::string &getString() const {
+      return Str;
+    }
+
+    unsigned getOperandNo() const {
+      assert(isOperand());
+      return OperandNo;
+    }
+
+    CharSourceRange getRange() const {
+      assert(isOperand() && "Range is currently used only for Operands.");
+      return Range;
+    }
+
+    /// getModifier - Get the modifier for this operand, if present.  This
+    /// returns '\0' if there was no modifier.
+    char getModifier() const;
+  };
+
+  /// Assemble final IR asm string.
+  std::string generateAsmString(const ASTContext &C) const;
+
+  //===--- Output operands ---===//
+
+  IdentifierInfo *getOutputIdentifier(unsigned i) const {
+    return Names[i];
+  }
+
+  StringRef getOutputName(unsigned i) const {
+    if (IdentifierInfo *II = getOutputIdentifier(i))
+      return II->getName();
+
+    return StringRef();
+  }
+
+  StringRef getOutputConstraint(unsigned i) const;
+
+  const StringLiteral *getOutputConstraintLiteral(unsigned i) const {
+    return Constraints[i];
+  }
+  StringLiteral *getOutputConstraintLiteral(unsigned i) {
+    return Constraints[i];
+  }
+
+  Expr *getOutputExpr(unsigned i);
+
+  const Expr *getOutputExpr(unsigned i) const {
+    return const_cast<IRAsmStmt*>(this)->getOutputExpr(i);
+  }
+
+  //===--- Input operands ---===//
+
+  IdentifierInfo *getInputIdentifier(unsigned i) const {
+    return Names[i + NumOutputs];
+  }
+
+  StringRef getInputName(unsigned i) const {
+    if (IdentifierInfo *II = getInputIdentifier(i))
+      return II->getName();
+
+    return StringRef();
+  }
+
+  StringRef getInputConstraint(unsigned i) const;
+
+  const StringLiteral *getInputConstraintLiteral(unsigned i) const {
+    return Constraints[i + NumOutputs];
+  }
+  StringLiteral *getInputConstraintLiteral(unsigned i) {
+    return Constraints[i + NumOutputs];
+  }
+
+  Expr *getInputExpr(unsigned i);
+  void setInputExpr(unsigned i, Expr *E);
+
+  const Expr *getInputExpr(unsigned i) const {
+    return const_cast<IRAsmStmt*>(this)->getInputExpr(i);
+  }
+
+private:
+  void setOutputsAndInputsAndClobbers(const ASTContext &C,
+                                      IdentifierInfo **Names,
+                                      StringLiteral **Constraints,
+                                      Stmt **Exprs,
+                                      unsigned NumOutputs,
+                                      unsigned NumInputs,
+                                      StringLiteral **Clobbers,
+                                      unsigned NumClobbers);
+public:
+
+  //===--- Other ---===//
+
+  /// getNamedOperand - Given a symbolic operand reference like %[foo],
+  /// translate this into a numeric value needed to reference the same operand.
+  /// This returns -1 if the operand name is invalid.
+  //int getNamedOperand(StringRef SymbolicName) const;
+
+  StringRef getClobber(unsigned i) const;
+  StringLiteral *getClobberStringLiteral(unsigned i) { return Clobbers[i]; }
+  const StringLiteral *getClobberStringLiteral(unsigned i) const {
+    return Clobbers[i];
+  }
+
+  SourceLocation getLocStart() const LLVM_READONLY { return AsmLoc; }
+  SourceLocation getLocEnd() const LLVM_READONLY { return RParenLoc; }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == IRAsmStmtClass;
   }
 };
 
