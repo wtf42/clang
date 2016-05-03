@@ -3399,13 +3399,14 @@ class FileScopeAsmDecl : public Decl {
   virtual void anchor();
   StringLiteral *AsmString;
   SourceLocation RParenLoc;
+  bool IRAsm;
   FileScopeAsmDecl(DeclContext *DC, StringLiteral *asmstring,
-                   SourceLocation StartL, SourceLocation EndL)
-    : Decl(FileScopeAsm, DC, StartL), AsmString(asmstring), RParenLoc(EndL) {}
+                   SourceLocation StartL, SourceLocation EndL, bool IRAsm)
+    : Decl(FileScopeAsm, DC, StartL), AsmString(asmstring), RParenLoc(EndL), IRAsm(IRAsm) {}
 public:
   static FileScopeAsmDecl *Create(ASTContext &C, DeclContext *DC,
                                   StringLiteral *Str, SourceLocation AsmLoc,
-                                  SourceLocation RParenLoc);
+                                  SourceLocation RParenLoc, bool IRAsm);
 
   static FileScopeAsmDecl *CreateDeserialized(ASTContext &C, unsigned ID);
   
@@ -3419,6 +3420,8 @@ public:
   const StringLiteral *getAsmString() const { return AsmString; }
   StringLiteral *getAsmString() { return AsmString; }
   void setAsmString(StringLiteral *Asm) { AsmString = Asm; }
+
+  bool isIRAsm() { return IRAsm; }
 
   static bool classof(const Decl *D) { return classofKind(D->getKind()); }
   static bool classofKind(Kind K) { return K == FileScopeAsm; }

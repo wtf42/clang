@@ -698,15 +698,30 @@ Parser::ParseExternalDeclaration(ParsedAttributesWithRange &attrs,
     SourceLocation StartLoc = Tok.getLocation();
     SourceLocation EndLoc;
 
-    ExprResult Result(ParseSimpleAsm(&EndLoc));
+    bool IRAsm = false;
+    ExprResult Result;
+    
+    if (NextToken().is(tok::kw___ir)) {
+      IRAsm = true;
+      Result = ParseSimpleIRAsm(&EndLoc);
+    } else {
+      IRAsm = false;
+      Result = ParseSimpleAsm(&EndLoc);
+    }
+
+    //ExprResult Result(ParseSimpleAsm(&EndLoc));
 
     // Check if GNU-style InlineAsm is disabled.
     // Empty asm string is allowed because it will not introduce
     // any assembly code.
-    if (!(getLangOpts().GNUAsm || Result.isInvalid())) {
+    if (!IRAsm && !(getLangOpts().GNUAsm || Result.isInvalid())) {
       const auto *SL = cast<StringLiteral>(Result.get());
       if (!SL->getString().trim().empty())
         Diag(StartLoc, diag::err_gnu_inline_asm_disabled);
+    }
+
+    if (IRAsm && !getLangOpts().IRAsm) {
+      Diag(StartLoc, diag::err_gnu_inline_asm_disabled);
     }
 
     ExpectAndConsume(tok::semi, diag::err_expected_after,
@@ -714,7 +729,7 @@ Parser::ParseExternalDeclaration(ParsedAttributesWithRange &attrs,
 
     if (Result.isInvalid())
       return nullptr;
-    SingleDecl = Actions.ActOnFileScopeAsmDecl(Result.get(), StartLoc, EndLoc);
+    SingleDecl = Actions.ActOnFileScopeAsmDecl(Result.get(), StartLoc, EndLoc, IRAsm);
     break;
   }
   case tok::at:
@@ -1337,6 +1352,35 @@ ExprResult Parser::ParseSimpleAsm(SourceLocation *EndLoc) {
       << FixItHint::CreateRemoval(RemovalRange);
     ConsumeToken();
   }
+
+  BalancedDelimiterTracker T(*this, tok::l_paren);
+  if (T.consumeOpen()) {
+    Diag(Tok, diag::err_expected_lparen_after) << "asm";
+    return ExprError();
+  }
+
+  ExprResult Result(ParseAsmStringLiteral());
+
+  if (!Result.isInvalid()) {
+    // Close the paren and get the location of the end bracket
+    T.consumeClose();
+    if (EndLoc)
+      *EndLoc = T.getCloseLocation();
+  } else if (SkipUntil(tok::r_paren, StopAtSemi | StopBeforeMatch)) {
+    if (EndLoc)
+      *EndLoc = Tok.getLocation();
+    ConsumeParen();
+  }
+
+  return Result;
+}
+
+ExprResult Parser::ParseSimpleIRAsm(SourceLocation *EndLoc) {
+  assert(Tok.is(tok::kw_asm) && "Not an asm!");
+  SourceLocation Loc = ConsumeToken();
+  
+  assert(Tok.is(tok::kw___ir) && "Not an IR asm!");
+  ConsumeToken();
 
   BalancedDelimiterTracker T(*this, tok::l_paren);
   if (T.consumeOpen()) {

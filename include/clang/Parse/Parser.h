@@ -1253,6 +1253,7 @@ private:
   // the simple-asm.
   ExprResult ParseSimpleAsm(SourceLocation *EndLoc = nullptr);
   ExprResult ParseAsmStringLiteral();
+  ExprResult ParseSimpleIRAsm(SourceLocation *EndLoc = nullptr);
 
   // Objective-C External Declarations
   void MaybeSkipAttributes(tok::ObjCKeywordKind Kind);
