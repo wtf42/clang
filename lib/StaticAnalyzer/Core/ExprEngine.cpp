@@ -1018,6 +1018,12 @@ void ExprEngine::Visit(const Stmt *S, ExplodedNode *Pred,
       Bldr.addNodes(Dst);
       break;
 
+    case Stmt::IRAsmStmtClass:
+      Bldr.takeNodes(Pred);
+      VisitIRAsmStmt(cast<IRAsmStmt>(S), Pred, Dst);
+      Bldr.addNodes(Dst);
+      break;
+
     case Stmt::MSAsmStmtClass:
       Bldr.takeNodes(Pred);
       VisitMSAsmStmt(cast<MSAsmStmt>(S), Pred, Dst);
@@ -2445,6 +2451,12 @@ void ExprEngine::VisitGCCAsmStmt(const GCCAsmStmt *A, ExplodedNode *Pred,
   }
 
   Bldr.generateNode(A, Pred, state);
+}
+
+void ExprEngine::VisitIRAsmStmt(const IRAsmStmt *A, ExplodedNode *Pred,
+                                ExplodedNodeSet &Dst) {
+  StmtNodeBuilder Bldr(Pred, Dst, *currBldrCtx);
+  Bldr.generateNode(A, Pred, Pred->getState());
 }
 
 void ExprEngine::VisitMSAsmStmt(const MSAsmStmt *A, ExplodedNode *Pred,

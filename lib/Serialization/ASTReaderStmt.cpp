@@ -337,6 +337,29 @@ void ASTStmtReader::VisitGCCAsmStmt(GCCAsmStmt *S) {
                                     Clobbers.data(), NumClobbers);
 }
 
+void ASTStmtReader::VisitIRAsmStmt(IRAsmStmt *S) {
+  VisitAsmStmt(S);
+  S->setRParenLoc(ReadSourceLocation(Record, Idx));
+  S->setAsmString(cast_or_null<StringLiteral>(Reader.ReadSubStmt()));
+
+  unsigned NumOutputs = S->getNumOutputs();
+  unsigned NumInputs = S->getNumInputs();
+
+  // Outputs and inputs
+  SmallVector<IdentifierInfo *, 16> Names;
+  SmallVector<StringLiteral*, 16> Constraints;
+  SmallVector<Stmt*, 16> Exprs;
+  for (unsigned I = 0, N = NumOutputs + NumInputs; I != N; ++I) {
+    Names.push_back(Reader.GetIdentifierInfo(F, Record, Idx));
+    Constraints.push_back(cast_or_null<StringLiteral>(Reader.ReadSubStmt()));
+    Exprs.push_back(Reader.ReadSubStmt());
+  }
+
+  S->setOutputsAndInputsAndClobbers(Reader.getContext(),
+                                    Names.data(), Constraints.data(),
+                                    Exprs.data(), NumOutputs, NumInputs);
+}
+
 void ASTStmtReader::VisitMSAsmStmt(MSAsmStmt *S) {
   VisitAsmStmt(S);
   S->LBraceLoc = ReadSourceLocation(Record, Idx);
@@ -2704,6 +2727,10 @@ Stmt *ASTReader::ReadStmtFromStream(ModuleFile &F) {
 
     case STMT_GCCASM:
       S = new (Context) GCCAsmStmt(Empty);
+      break;
+
+    case STMT_IRASM:
+      S = new (Context) IRAsmStmt(Empty);
       break;
 
     case STMT_MSASM:

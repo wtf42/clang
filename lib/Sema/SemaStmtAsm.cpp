@@ -778,3 +778,19 @@ LabelDecl *Sema::GetOrCreateMSAsmLabel(StringRef ExternalLabelName,
 
   return Label;
 }
+
+
+StmtResult Sema::ActOnIRAsmStmt(SourceLocation AsmLoc, bool IsSimple,
+                                unsigned NumOutputs, unsigned NumInputs,
+                                IdentifierInfo **Names,
+                                MultiExprArg constraints, MultiExprArg Exprs,
+                                Expr *asmString, SourceLocation RParenLoc) {
+  StringLiteral **Constraints =
+    reinterpret_cast<StringLiteral**>(constraints.data());
+  StringLiteral *AsmString = cast<StringLiteral>(asmString);
+
+  return new (Context) IRAsmStmt(Context, AsmLoc, IsSimple, NumOutputs,
+                                 NumInputs, Names, Constraints, Exprs.data(),
+                                 AsmString, RParenLoc);
+}
+

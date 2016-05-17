@@ -1232,6 +1232,8 @@ namespace clang {
       STMT_CAPTURED,
       /// \brief A GCC-style AsmStmt record.
       STMT_GCCASM,
+      /// \brief A IR-style AsmStmt record.
+      STMT_IRASM,
       /// \brief A MS-style AsmStmt record.
       STMT_MSASM,
       /// \brief A PredefinedExpr record.

@@ -2301,7 +2301,11 @@ enum CXCursorKind {
    */
   CXCursor_OMPTargetParallelForDirective = 264,
 
-  CXCursor_LastStmt                   = CXCursor_OMPTargetParallelForDirective,
+  /** \brief IR inline assembly statement extension.
+  */
+  CXCursor_IRAsmStmt                     = 265,
+
+  CXCursor_LastStmt                      = CXCursor_IRAsmStmt,
 
   /**
    * \brief Cursor that represents the translation unit itself.

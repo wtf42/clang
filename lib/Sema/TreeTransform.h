@@ -1275,6 +1275,20 @@ public:
                                      AsmString, Clobbers, RParenLoc);
   }
 
+  /// \brief Build a new IR inline asm statement.
+  ///
+  /// By default, performs semantic analysis to build the new statement.
+  /// Subclasses may override this routine to provide different behavior.
+  StmtResult RebuildIRAsmStmt(SourceLocation AsmLoc, bool IsSimple,
+                              unsigned NumOutputs,
+                              unsigned NumInputs, IdentifierInfo **Names,
+                              MultiExprArg Constraints, MultiExprArg Exprs,
+                              Expr *AsmString, SourceLocation RParenLoc) {
+    return getSema().ActOnIRAsmStmt(AsmLoc, IsSimple, NumOutputs,
+                                    NumInputs, Names, Constraints, Exprs,
+                                    AsmString, RParenLoc);
+  }
+
   /// \brief Build a new MS style inline asm statement.
   ///
   /// By default, performs semantic analysis to build the new statement.
@@ -6547,6 +6561,67 @@ TreeTransform<Derived>::TransformGCCAsmStmt(GCCAsmStmt *S) {
                                         S->getNumInputs(), Names.data(),
                                         Constraints, Exprs, AsmString.get(),
                                         Clobbers, S->getRParenLoc());
+}
+
+template<typename Derived>
+StmtResult
+TreeTransform<Derived>::TransformIRAsmStmt(IRAsmStmt *S) {
+
+  SmallVector<Expr*, 8> Constraints;
+  SmallVector<Expr*, 8> Exprs;
+  SmallVector<IdentifierInfo *, 4> Names;
+
+  ExprResult AsmString;
+  SmallVector<Expr*, 8> Clobbers;
+
+  bool ExprsChanged = false;
+
+  // Go through the outputs.
+  for (unsigned I = 0, E = S->getNumOutputs(); I != E; ++I) {
+    Names.push_back(S->getOutputIdentifier(I));
+
+    // No need to transform the constraint literal.
+    Constraints.push_back(S->getOutputConstraintLiteral(I));
+
+    // Transform the output expr.
+    Expr *OutputExpr = S->getOutputExpr(I);
+    ExprResult Result = getDerived().TransformExpr(OutputExpr);
+    if (Result.isInvalid())
+      return StmtError();
+
+    ExprsChanged |= Result.get() != OutputExpr;
+
+    Exprs.push_back(Result.get());
+  }
+
+  // Go through the inputs.
+  for (unsigned I = 0, E = S->getNumInputs(); I != E; ++I) {
+    Names.push_back(S->getInputIdentifier(I));
+
+    // No need to transform the constraint literal.
+    Constraints.push_back(S->getInputConstraintLiteral(I));
+
+    // Transform the input expr.
+    Expr *InputExpr = S->getInputExpr(I);
+    ExprResult Result = getDerived().TransformExpr(InputExpr);
+    if (Result.isInvalid())
+      return StmtError();
+
+    ExprsChanged |= Result.get() != InputExpr;
+
+    Exprs.push_back(Result.get());
+  }
+
+  if (!getDerived().AlwaysRebuild() && !ExprsChanged)
+    return S;
+
+  // No need to transform the asm string literal.
+  AsmString = S->getAsmString();
+  return getDerived().RebuildIRAsmStmt(S->getAsmLoc(), S->isSimple(),
+                                       S->getNumOutputs(),
+                                       S->getNumInputs(), Names.data(),
+                                       Constraints, Exprs, AsmString.get(),
+                                       S->getRParenLoc());
 }
 
 template<typename Derived>
