@@ -32,6 +32,7 @@ def CapturedStmt : Stmt;
 // Asm statements
 def AsmStmt : Stmt<1>;
 def GCCAsmStmt : DStmt<AsmStmt>;
+def IRAsmStmt : DStmt<AsmStmt>;
 def MSAsmStmt : DStmt<AsmStmt>;
 
 // Obj-C statements

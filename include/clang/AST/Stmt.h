@@ -1474,6 +1474,7 @@ public:
 
   static bool classof(const Stmt *T) {
     return T->getStmtClass() == GCCAsmStmtClass ||
+      T->getStmtClass() == IRAsmStmtClass ||
       T->getStmtClass() == MSAsmStmtClass;
   }
 
@@ -1816,6 +1817,114 @@ public:
 
   child_range children() {
     return child_range(&Exprs[0], &Exprs[NumInputs + NumOutputs]);
+  }
+};
+
+
+class IRAsmStmt : public AsmStmt {
+  SourceLocation RParenLoc;
+  StringLiteral *AsmStr;
+
+  StringLiteral **Constraints;
+  IdentifierInfo **Names;
+
+  friend class ASTStmtReader;
+
+public:
+  IRAsmStmt(const ASTContext &C, SourceLocation asmloc, bool issimple,
+            unsigned numoutputs, unsigned numinputs,
+            IdentifierInfo **names, StringLiteral **constraints, Expr **exprs,
+            StringLiteral *asmstr, SourceLocation rparenloc);
+
+  /// \brief Build an empty inline-assembly statement.
+  explicit IRAsmStmt(EmptyShell Empty) : AsmStmt(IRAsmStmtClass, Empty),
+    Constraints(nullptr), Names(nullptr) { }
+
+  SourceLocation getRParenLoc() const { return RParenLoc; }
+  void setRParenLoc(SourceLocation L) { RParenLoc = L; }
+
+  //===--- Asm String Analysis ---===//
+
+  const StringLiteral *getAsmString() const { return AsmStr; }
+  StringLiteral *getAsmString() { return AsmStr; }
+  void setAsmString(StringLiteral *E) { AsmStr = E; }
+
+  /// Assemble final IR asm string.
+  std::string generateAsmString(const ASTContext &C) const;
+
+  //===--- Output operands ---===//
+
+  IdentifierInfo *getOutputIdentifier(unsigned i) const {
+    return Names[i];
+  }
+
+  StringRef getOutputName(unsigned i) const {
+    if (IdentifierInfo *II = getOutputIdentifier(i))
+      return II->getName();
+
+    return StringRef();
+  }
+
+  StringRef getOutputConstraint(unsigned i) const;
+
+  const StringLiteral *getOutputConstraintLiteral(unsigned i) const {
+    return Constraints[i];
+  }
+  StringLiteral *getOutputConstraintLiteral(unsigned i) {
+    return Constraints[i];
+  }
+
+  Expr *getOutputExpr(unsigned i);
+
+  const Expr *getOutputExpr(unsigned i) const {
+    return const_cast<IRAsmStmt*>(this)->getOutputExpr(i);
+  }
+
+  //===--- Input operands ---===//
+
+  IdentifierInfo *getInputIdentifier(unsigned i) const {
+    return Names[i + NumOutputs];
+  }
+
+  StringRef getInputName(unsigned i) const {
+    if (IdentifierInfo *II = getInputIdentifier(i))
+      return II->getName();
+
+    return StringRef();
+  }
+
+  StringRef getInputConstraint(unsigned i) const;
+
+  const StringLiteral *getInputConstraintLiteral(unsigned i) const {
+    return Constraints[i + NumOutputs];
+  }
+  StringLiteral *getInputConstraintLiteral(unsigned i) {
+    return Constraints[i + NumOutputs];
+  }
+
+  Expr *getInputExpr(unsigned i);
+  void setInputExpr(unsigned i, Expr *E);
+
+  const Expr *getInputExpr(unsigned i) const {
+    return const_cast<IRAsmStmt*>(this)->getInputExpr(i);
+  }
+
+private:
+  void setOutputsAndInputsAndClobbers(const ASTContext &C,
+                                      IdentifierInfo **Names,
+                                      StringLiteral **Constraints,
+                                      Stmt **Exprs,
+                                      unsigned NumOutputs,
+                                      unsigned NumInputs);
+public:
+
+  //===--- Other ---===//
+
+  SourceLocation getLocStart() const LLVM_READONLY { return AsmLoc; }
+  SourceLocation getLocEnd() const LLVM_READONLY { return RParenLoc; }
+
+  static bool classof(const Stmt *T) {
+    return T->getStmtClass() == IRAsmStmtClass;
   }
 };
 

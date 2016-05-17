@@ -330,6 +330,8 @@ AttributedStmt *AttributedStmt::CreateEmpty(const ASTContext &C,
 std::string AsmStmt::generateAsmString(const ASTContext &C) const {
   if (const GCCAsmStmt *gccAsmStmt = dyn_cast<GCCAsmStmt>(this))
     return gccAsmStmt->generateAsmString(C);
+  if (const IRAsmStmt *irAsmStmt = dyn_cast<IRAsmStmt>(this))
+    return irAsmStmt->generateAsmString(C);
   if (const MSAsmStmt *msAsmStmt = dyn_cast<MSAsmStmt>(this))
     return msAsmStmt->generateAsmString(C);
   llvm_unreachable("unknown asm statement kind!");
@@ -338,6 +340,8 @@ std::string AsmStmt::generateAsmString(const ASTContext &C) const {
 StringRef AsmStmt::getOutputConstraint(unsigned i) const {
   if (const GCCAsmStmt *gccAsmStmt = dyn_cast<GCCAsmStmt>(this))
     return gccAsmStmt->getOutputConstraint(i);
+  if (const IRAsmStmt *irAsmStmt = dyn_cast<IRAsmStmt>(this))
+    return irAsmStmt->getOutputConstraint(i);
   if (const MSAsmStmt *msAsmStmt = dyn_cast<MSAsmStmt>(this))
     return msAsmStmt->getOutputConstraint(i);
   llvm_unreachable("unknown asm statement kind!");
@@ -346,6 +350,8 @@ StringRef AsmStmt::getOutputConstraint(unsigned i) const {
 const Expr *AsmStmt::getOutputExpr(unsigned i) const {
   if (const GCCAsmStmt *gccAsmStmt = dyn_cast<GCCAsmStmt>(this))
     return gccAsmStmt->getOutputExpr(i);
+  if (const IRAsmStmt *irAsmStmt = dyn_cast<IRAsmStmt>(this))
+    return irAsmStmt->getOutputExpr(i);
   if (const MSAsmStmt *msAsmStmt = dyn_cast<MSAsmStmt>(this))
     return msAsmStmt->getOutputExpr(i);
   llvm_unreachable("unknown asm statement kind!");
@@ -354,6 +360,8 @@ const Expr *AsmStmt::getOutputExpr(unsigned i) const {
 StringRef AsmStmt::getInputConstraint(unsigned i) const {
   if (const GCCAsmStmt *gccAsmStmt = dyn_cast<GCCAsmStmt>(this))
     return gccAsmStmt->getInputConstraint(i);
+  if (const IRAsmStmt *irAsmStmt = dyn_cast<IRAsmStmt>(this))
+    return irAsmStmt->getInputConstraint(i);
   if (const MSAsmStmt *msAsmStmt = dyn_cast<MSAsmStmt>(this))
     return msAsmStmt->getInputConstraint(i);
   llvm_unreachable("unknown asm statement kind!");
@@ -362,6 +370,8 @@ StringRef AsmStmt::getInputConstraint(unsigned i) const {
 const Expr *AsmStmt::getInputExpr(unsigned i) const {
   if (const GCCAsmStmt *gccAsmStmt = dyn_cast<GCCAsmStmt>(this))
     return gccAsmStmt->getInputExpr(i);
+  if (const IRAsmStmt *irAsmStmt = dyn_cast<IRAsmStmt>(this))
+    return irAsmStmt->getInputExpr(i);
   if (const MSAsmStmt *msAsmStmt = dyn_cast<MSAsmStmt>(this))
     return msAsmStmt->getInputExpr(i);
   llvm_unreachable("unknown asm statement kind!");
@@ -370,6 +380,8 @@ const Expr *AsmStmt::getInputExpr(unsigned i) const {
 StringRef AsmStmt::getClobber(unsigned i) const {
   if (const GCCAsmStmt *gccAsmStmt = dyn_cast<GCCAsmStmt>(this))
     return gccAsmStmt->getClobber(i);
+  if (const IRAsmStmt *irAsmStmt = dyn_cast<IRAsmStmt>(this))
+    return irAsmStmt->getClobber(i);
   if (const MSAsmStmt *msAsmStmt = dyn_cast<MSAsmStmt>(this))
     return msAsmStmt->getClobber(i);
   llvm_unreachable("unknown asm statement kind!");
@@ -718,6 +730,82 @@ MSAsmStmt::MSAsmStmt(const ASTContext &C, SourceLocation asmloc,
 
   initialize(C, asmstr, asmtoks, constraints, exprs, clobbers);
 }
+
+IRAsmStmt::IRAsmStmt(const ASTContext &C, SourceLocation asmloc,
+                     bool issimple, unsigned numoutputs,
+                     unsigned numinputs, IdentifierInfo **names,
+                     StringLiteral **constraints, Expr **exprs,
+                     StringLiteral *asmstr, SourceLocation rparenloc)
+  : AsmStmt(IRAsmStmtClass, asmloc, issimple, false, numoutputs,
+            numinputs, 0), RParenLoc(rparenloc), AsmStr(asmstr) {
+
+  unsigned NumExprs = NumOutputs + NumInputs;
+
+  Names = new (C) IdentifierInfo*[NumExprs];
+  std::copy(names, names + NumExprs, Names);
+
+  Exprs = new (C) Stmt*[NumExprs];
+  std::copy(exprs, exprs + NumExprs, Exprs);
+
+  Constraints = new (C) StringLiteral*[NumExprs];
+  std::copy(constraints, constraints + NumExprs, Constraints);
+}
+
+Expr *IRAsmStmt::getOutputExpr(unsigned i) {
+  return cast<Expr>(Exprs[i]);
+}
+
+/// getOutputConstraint - Return the constraint string for the specified
+/// output operand.  All output constraints are known to be non-empty (either
+/// '=' or '+').
+StringRef IRAsmStmt::getOutputConstraint(unsigned i) const {
+  return getOutputConstraintLiteral(i)->getString();
+}
+
+Expr *IRAsmStmt::getInputExpr(unsigned i) {
+  return cast<Expr>(Exprs[i + NumOutputs]);
+}
+void IRAsmStmt::setInputExpr(unsigned i, Expr *E) {
+  Exprs[i + NumOutputs] = E;
+}
+
+/// getInputConstraint - Return the specified input constraint.  Unlike output
+/// constraints, these can be empty.
+StringRef IRAsmStmt::getInputConstraint(unsigned i) const {
+  return getInputConstraintLiteral(i)->getString();
+}
+
+void IRAsmStmt::setOutputsAndInputsAndClobbers(const ASTContext &C,
+                                               IdentifierInfo **Names,
+                                               StringLiteral **Constraints,
+                                               Stmt **Exprs,
+                                               unsigned NumOutputs,
+                                               unsigned NumInputs) {
+  this->NumOutputs = NumOutputs;
+  this->NumInputs = NumInputs;
+  this->NumClobbers = 0;
+
+  unsigned NumExprs = NumOutputs + NumInputs;
+
+  C.Deallocate(this->Names);
+  this->Names = new (C) IdentifierInfo*[NumExprs];
+  std::copy(Names, Names + NumExprs, this->Names);
+
+  C.Deallocate(this->Exprs);
+  this->Exprs = new (C) Stmt*[NumExprs];
+  std::copy(Exprs, Exprs + NumExprs, this->Exprs);
+
+  C.Deallocate(this->Constraints);
+  this->Constraints = new (C) StringLiteral*[NumExprs];
+  std::copy(Constraints, Constraints + NumExprs, this->Constraints);
+}
+
+/// Assemble final IR asm string
+std::string IRAsmStmt::generateAsmString(const ASTContext &C) const {
+  return getAsmString()->getString();
+}
+
+
 
 static StringRef copyIntoContext(const ASTContext &C, StringRef str) {
   return str.copy(C);
