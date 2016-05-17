@@ -624,6 +624,8 @@ KEYWORD(__builtin_convertvector   , KEYALL)
 ALIAS("__char16_t"   , char16_t   , KEYCXX)
 ALIAS("__char32_t"   , char32_t   , KEYCXX)
 
+KEYWORD(__ir                      , KEYALL)
+
 // Clang-specific keywords enabled only in testing.
 TESTING_KEYWORD(__unknown_anytype , KEYALL)
 
