@@ -4177,14 +4177,14 @@ void FileScopeAsmDecl::anchor() { }
 FileScopeAsmDecl *FileScopeAsmDecl::Create(ASTContext &C, DeclContext *DC,
                                            StringLiteral *Str,
                                            SourceLocation AsmLoc,
-                                           SourceLocation RParenLoc) {
-  return new (C, DC) FileScopeAsmDecl(DC, Str, AsmLoc, RParenLoc);
+                                           SourceLocation RParenLoc, bool IRAsm) {
+  return new (C, DC) FileScopeAsmDecl(DC, Str, AsmLoc, RParenLoc, IRAsm);
 }
 
 FileScopeAsmDecl *FileScopeAsmDecl::CreateDeserialized(ASTContext &C,
                                                        unsigned ID) {
   return new (C, ID) FileScopeAsmDecl(nullptr, nullptr, SourceLocation(),
-                                      SourceLocation());
+                                      SourceLocation(), false);
 }
 
 void EmptyDecl::anchor() {}

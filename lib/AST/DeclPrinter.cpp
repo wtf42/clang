@@ -769,7 +769,7 @@ void DeclPrinter::VisitParmVarDecl(ParmVarDecl *D) {
 }
 
 void DeclPrinter::VisitFileScopeAsmDecl(FileScopeAsmDecl *D) {
-  Out << "__asm (";
+  Out << "__asm " << (D->isIRAsm() ? "__ir" : "") << "(";
   D->getAsmString()->printPretty(Out, nullptr, Policy, Indentation);
   Out << ")";
 }

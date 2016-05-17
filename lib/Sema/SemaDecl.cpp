@@ -14791,12 +14791,13 @@ void Sema::ActOnEnumBody(SourceLocation EnumLoc, SourceLocation LBraceLoc,
 
 Decl *Sema::ActOnFileScopeAsmDecl(Expr *expr,
                                   SourceLocation StartLoc,
-                                  SourceLocation EndLoc) {
+                                  SourceLocation EndLoc,
+                                  bool IRAsm) {
   StringLiteral *AsmString = cast<StringLiteral>(expr);
 
   FileScopeAsmDecl *New = FileScopeAsmDecl::Create(Context, CurContext,
                                                    AsmString, StartLoc,
-                                                   EndLoc);
+                                                   EndLoc, IRAsm);
   CurContext->addDecl(New);
   return New;
 }

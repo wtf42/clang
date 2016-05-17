@@ -1795,7 +1795,8 @@ public:
   void DiagnoseInvalidJumps(Stmt *Body);
   Decl *ActOnFileScopeAsmDecl(Expr *expr,
                               SourceLocation AsmLoc,
-                              SourceLocation RParenLoc);
+                              SourceLocation RParenLoc,
+                              bool IRAsm);
 
   /// \brief Handle a C++11 empty-declaration and attribute-declaration.
   Decl *ActOnEmptyDeclaration(Scope *S,
